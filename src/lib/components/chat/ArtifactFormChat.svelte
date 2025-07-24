@@ -207,9 +207,12 @@
 	// Function to handle name suggestion input
 	async function handleNameSuggestionInput() {
 		const input = userInput.trim();
+		// Debug logging for name suggestions
+		console.log('Handling name suggestion input:', input, 'Current field:', currentField);
 
 		// Only show suggestions for inputs with 2+ characters
 		if (input.length < 2) {
+			console.log('Input too short, clearing suggestions');
 			clearSuggestions();
 			return;
 		}
@@ -223,7 +226,14 @@
 
 		try {
 			const token = localStorage.token;
-			// Allow suggestions even without token (using test endpoint)
+
+			// Check if token exists
+			if (!token) {
+				console.warn('No authentication token found for name suggestions');
+				// Process input normally without suggestions
+				await processFieldInput(currentField, input, false);
+				return;
+			}
 
 			const response = await getNameSuggestions(token, {
 				partial_name: input,
@@ -231,6 +241,7 @@
 			});
 
 			if (response && response.suggestions && response.suggestions.length > 0) {
+				console.log('Got suggestions:', response.suggestions);
 				nameSuggestions = response.suggestions;
 				showingSuggestions = true;
 				suggestionField = currentField;
@@ -243,7 +254,8 @@
 					response.suggestions.map((s, i) => i + 1 + '. ' + s.name + ' - ' + s.email).join('\n') +
 					'\n\nPlease select a number (1-' +
 					response.suggestions.length +
-					') or type the exact full name if not listed.';
+					') or type the full name if not listed.\n\n' +
+					'💡 You can also type the full name directly if you see it in the list above.';
 
 				// Remove any existing suggestion messages first
 				chatFlow = chatFlow.filter(
@@ -265,12 +277,13 @@
 				isWaitingForInput = true;
 			} else {
 				// If no suggestions found, process the input normally
-				await processFieldInput(currentField, input);
+				await processFieldInput(currentField, input, false);
 			}
 		} catch (error) {
 			console.error('Error getting name suggestions:', error);
 			// If error occurs, process the input normally
-			await processFieldInput(currentField, input);
+			console.log('Falling back to normal processing for input:', input);
+			await processFieldInput(currentField, input, false);
 		}
 	}
 
@@ -287,9 +300,17 @@
 
 	// Function to handle suggestion selection
 	async function handleSuggestionSelection(selection: string) {
+		console.log(
+			'Handling suggestion selection:',
+			selection,
+			'Current suggestions:',
+			nameSuggestions
+		);
+
 		const num = parseInt(selection);
 
-		if (num >= 1 && num <= nameSuggestions.length) {
+		// Check if user selected a number (1-5)
+		if (!isNaN(num) && num >= 1 && num <= nameSuggestions.length) {
 			const selectedSuggestion = nameSuggestions[num - 1];
 
 			// Add user selection to chat
@@ -313,10 +334,10 @@
 			await tick();
 			scrollToBottom();
 
-			// Process the selected name
-			await processFieldInput(currentField, selectedSuggestion.name);
+			// Process the selected name (skip ack since we already added it)
+			await processFieldInput(currentField, selectedSuggestion.name, true);
 		} else {
-			// User typed something else - validate it properly
+			// User typed something else - could be a full name or custom input
 			// Add user input to chat
 			chatFlow.push({ role: 'user', content: selection });
 			chatFlow = [...chatFlow];
@@ -324,93 +345,45 @@
 			// Clear suggestions
 			clearSuggestions();
 
-			// First, try to match the name using the API
-			try {
-				const token = localStorage.token;
-				const matchResponse = await matchUserName(token, { name: selection });
+			// Check if the input matches any of the suggested names exactly
+			const exactMatch = nameSuggestions.find(
+				(s) =>
+					s.name.toLowerCase() === selection.toLowerCase() ||
+					s.name.toLowerCase().includes(selection.toLowerCase()) ||
+					selection.toLowerCase().includes(s.name.toLowerCase())
+			);
 
-				if (matchResponse && matchResponse.found && matchResponse.user) {
-					// Found a match - use the matched name
-					const matchedName = matchResponse.user.name;
-
-					chatFlow.push({
-						role: 'assistant',
-						content:
-							'I\'ve recorded "' + matchedName + '" for ' + fieldConfig[currentField].name + '.'
-					});
-					chatFlow = [...chatFlow];
-					await tick();
-					scrollToBottom();
-
-					await processFieldInput(currentField, matchedName);
-					return;
-				} else if (
-					matchResponse &&
-					matchResponse.suggestions &&
-					matchResponse.suggestions.length > 0
-				) {
-					// No exact match but we have suggestions - show them
-					nameSuggestions = matchResponse.suggestions;
-					showingSuggestions = true;
-					suggestionField = currentField;
-
-					const suggestionText =
-						'I couldn\'t find an exact match for "' +
-						selection +
-						'". Here are some suggestions:\n\n' +
-						matchResponse.suggestions
-							.map((s, i) => i + 1 + '. ' + s.name + ' - ' + s.email)
-							.join('\n') +
-						'\n\nPlease select a number (1-' +
-						matchResponse.suggestions.length +
-						') or type the exact full name if not listed.';
-
-					chatFlow.push({ role: 'assistant', content: suggestionText });
-					chatFlow = [...chatFlow];
-					await tick();
-					scrollToBottom();
-					return;
-				}
-			} catch (error) {
-				console.error('Error matching user name:', error);
-			}
-
-			// If no match found or API failed, validate the input using AI
-			const aiValidation = await validateFieldWithAI(currentField, selection);
-
-			if (aiValidation && !aiValidation.valid) {
-				// AI validation failed - ask user to re-enter
+			if (exactMatch) {
+				// User typed a name that matches one of the suggestions
 				chatFlow.push({
 					role: 'assistant',
 					content:
-						aiValidation.message +
-						'\n\nPlease provide a valid ' +
-						fieldConfig[currentField].name +
-						'.'
+						'I\'ve recorded "' + exactMatch.name + '" for ' + fieldConfig[currentField].name + '.'
 				});
 				chatFlow = [...chatFlow];
 				await tick();
 				scrollToBottom();
-				return;
+				await processFieldInput(currentField, exactMatch.name, true);
+			} else {
+				// User typed a custom name - acknowledge and process it
+				chatFlow.push({
+					role: 'assistant',
+					content: 'I\'ve recorded "' + selection + '" for ' + fieldConfig[currentField].name + '.'
+				});
+				chatFlow = [...chatFlow];
+				await tick();
+				scrollToBottom();
+				await processFieldInput(currentField, selection, true);
 			}
-
-			// If we get here, the input seems valid - acknowledge it
-			chatFlow.push({
-				role: 'assistant',
-				content: 'I\'ve recorded "' + selection + '" for ' + fieldConfig[currentField].name + '.'
-			});
-			chatFlow = [...chatFlow];
-			await tick();
-			scrollToBottom();
-
-			await processFieldInput(currentField, selection);
 		}
 	}
 
 	// Function to move to next field after processing input
-	async function moveToNextField(field: string) {
-		// Add acknowledgment message
-		const ack = fieldAcknowledgments[field] || 'Got it!';
+	async function moveToNextField(field: string, skipAck: boolean = false) {
+		console.log('Moving to next field:', field, 'Skip ack:', skipAck);
+
+		// Add acknowledgment message (unless skipped)
+		const ack = skipAck ? '' : fieldAcknowledgments[field] || 'Got it!';
 
 		// Find next field
 		const nextIdx = fieldOrder.indexOf(field) + 1;
@@ -449,14 +422,9 @@
 			else if (nextField === 'created_by')
 				nextPrompt = 'Who is creating this request? (Type a name to see matching suggestions)';
 
-			// Add acknowledgment message first
-			chatFlow.push({ role: 'assistant', content: ack });
-			chatFlow = [...chatFlow];
-			await tick();
-			scrollToBottom();
-
-			// Then add the next field prompt
-			chatFlow.push({ role: 'assistant', content: nextPrompt });
+			const nextMessage = ack + ' ' + nextPrompt;
+			console.log('Adding next prompt:', nextMessage);
+			chatFlow.push({ role: 'assistant', content: nextMessage });
 			chatFlow = [...chatFlow];
 			saveChatFlow();
 			await tick();
@@ -470,21 +438,18 @@
 	}
 
 	// Enhanced processFieldInput to handle suggestions
-	async function processFieldInput(field: string, value: string) {
+	async function processFieldInput(field: string, value: string, skipAck: boolean = false) {
+		console.log('Processing field input:', field, value);
+
 		// Clear suggestions when processing input
 		clearSuggestions();
 
-		// Check if this is a suggestion selection
-		if (showingSuggestions && suggestionField === field) {
-			const num = parseInt(value);
-			if (num >= 1 && num <= nameSuggestions.length) {
-				const selectedSuggestion = nameSuggestions[num - 1];
-				value = selectedSuggestion.name;
-			}
-		}
+		// Note: Suggestion selection is now handled in handleSuggestionSelection function
+		// This function just processes the final value
 
 		// Rest of the existing processFieldInput logic...
 		const validation = validateField(field, value);
+		console.log('Field validation result:', field, validation);
 
 		if (typeof validation === 'string') {
 			// Validation error
@@ -512,8 +477,8 @@
 				editingField = null;
 			}
 
-			// Move to next field
-			await moveToNextField(field);
+			// Move to next field (skip ack if suggestions were shown)
+			await moveToNextField(field, skipAck);
 		}
 	}
 
@@ -1189,15 +1154,7 @@
 				'not sure',
 				'maybe',
 				'tbd',
-				'unknown',
-				'test',
-				'hello',
-				'ok',
-				'same',
-				'asdf',
-				'qwerty',
-				'123456',
-				'abc'
+				'unknown'
 			];
 			if (VAGUE_RESPONSES.includes(sanitizedValue.toLowerCase())) {
 				return 'Please provide the full name of the person responsible for this request. Responses like "skip", "n/a", "i dont know" are not allowed for the owner field.';
@@ -1215,11 +1172,6 @@
 			// Block single random letters
 			if (/^[a-zA-Z]$/.test(sanitizedValue)) {
 				return 'Please provide the full name of the person responsible, not just a single letter.';
-			}
-
-			// Check for patterns that look like partial names or typos (like "din1")
-			if (/^[a-z]{1,3}[0-9]+$/i.test(sanitizedValue)) {
-				return 'This looks like a partial name with numbers. Please provide the complete name of the person responsible.';
 			}
 
 			// Clean up the name
@@ -1386,15 +1338,7 @@
 				'not sure',
 				'maybe',
 				'tbd',
-				'unknown',
-				'test',
-				'hello',
-				'ok',
-				'same',
-				'asdf',
-				'qwerty',
-				'123456',
-				'abc'
+				'unknown'
 			];
 			if (VAGUE_RESPONSES.includes(sanitizedValue.toLowerCase())) {
 				return 'Please provide your full name. Responses like "skip", "n/a", "i dont know" are not allowed for this field.';
@@ -1408,10 +1352,6 @@
 			// Block single random letters
 			if (/^[a-zA-Z]$/.test(sanitizedValue)) {
 				return 'Please provide your full name, not just a single letter.';
-			}
-			// Check for patterns that look like partial names or typos (like "din1")
-			if (/^[a-z]{1,3}[0-9]+$/i.test(sanitizedValue)) {
-				return 'This looks like a partial name with numbers. Please provide your complete name.';
 			}
 			return { valid: true, correctedValue: sanitizedValue };
 		}
@@ -1466,247 +1406,8 @@
 		return { valid: true, correctedValue: sanitizedValue };
 	}
 
-	// Detect vague inputs that need guidance instead of processing as field data
-	async function detectVagueInput(userInput, currentField) {
-		const lowerInput = userInput.toLowerCase().trim();
-
-		// Patterns that indicate the user is asking for help or guidance
-		const vaguePatterns = [
-			// Help-seeking patterns
-			/how to fill/i,
-			/how do i fill/i,
-			/what should i fill/i,
-			/what do i need to fill/i,
-			/now what/i,
-			/what next/i,
-			/what should i do/i,
-			/i don't know/i,
-			/i dont know/i,
-			/idk/i,
-			/not sure/i,
-			/maybe/i,
-			/perhaps/i,
-			/um/i,
-			/umm/i,
-			/uh/i,
-			/uhh/i,
-
-			// Question patterns
-			/\?$/,
-			/what is/i,
-			/can you help/i,
-			/help me/i,
-			/i need help/i,
-			/please help/i,
-
-			// Confusion patterns
-			/i'm confused/i,
-			/im confused/i,
-			/confused/i,
-			/not clear/i,
-			/unclear/i,
-			/what does this mean/i,
-
-			// Generic responses
-			/ok/i,
-			/okay/i,
-			/sure/i,
-			/fine/i,
-			/whatever/i,
-			/same/i,
-			/yes/i,
-			/no/i,
-
-			// Very short or unclear inputs
-			/^[a-z]{1,2}$/i,
-			/^[0-9]{1,2}$/,
-			/^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/,
-
-			// Test inputs
-			/test/i,
-			/hello/i,
-			/hi/i,
-			/bye/i,
-			/asdf/i,
-			/qwerty/i,
-			/123456/i,
-			/abc/i
-		];
-
-		// Check if input matches any vague patterns
-		for (const pattern of vaguePatterns) {
-			if (pattern.test(lowerInput)) {
-				return true;
-			}
-		}
-
-		// Check for very short inputs that might be incomplete
-		if (lowerInput.length < 3 && !/^(0|1|2|3|critical|high|medium|low)$/i.test(lowerInput)) {
-			return true;
-		}
-
-		// Use AI to make final determination for complex cases
-		try {
-			const systemPrompt = `You are an expert at detecting whether user input is a vague request for help or actual field data.
-
-Current field: ${currentField}
-Field description: ${fieldConfig[currentField]?.description || 'No description available'}
-
-User input: "${userInput}"
-
-Determine if this input is:
-1. A vague request for help/guidance (should be rejected)
-2. Actual data for the field (should be processed)
-
-Vague inputs include:
-- Questions about how to fill the field
-- Requests for help or clarification
-- Generic responses like "ok", "same", "test"
-- Confusion expressions like "i don't know", "not sure"
-- Very short or unclear inputs
-
-Respond with JSON:
-{
-  "isVague": true/false,
-  "reason": "explanation of why it's vague or valid",
-  "confidence": 0.0-1.0
-}`;
-
-			const response = await callOpenAI([
-				{ role: 'system', content: systemPrompt },
-				{ role: 'user', content: `Analyze this input for field "${currentField}": "${userInput}"` }
-			]);
-
-			if (response) {
-				const result = JSON.parse(response);
-				return result.isVague;
-			}
-		} catch (error) {
-			console.error('Error in AI vague input detection:', error);
-		}
-
-		return false;
-	}
-
-	// Provide AI-powered guidance for vague inputs
-	async function provideAIGuidance(userInput, currentField) {
-		const fieldInfo = fieldConfig[currentField];
-
-		try {
-			const systemPrompt = `You are a helpful AI assistant guiding users through a database request form. The user has provided a vague input and needs guidance.
-
-Current field: ${currentField}
-Field name: ${fieldInfo?.name || currentField}
-Field description: ${fieldInfo?.description || 'No description available'}
-
-User's vague input: "${userInput}"
-
-Provide helpful, encouraging guidance that:
-1. Acknowledges their confusion or question
-2. Explains what information is needed for this specific field
-3. Gives clear examples of what they can provide
-4. Encourages them to provide the actual information
-5. Keeps the tone friendly and supportive
-
-Make your response conversational and specific to the field. Don't be too long - keep it concise but helpful.`;
-
-			const response = await callOpenAI([
-				{ role: 'system', content: systemPrompt },
-				{
-					role: 'user',
-					content: `Help the user with field "${currentField}" after their input: "${userInput}"`
-				}
-			]);
-
-			if (response) {
-				return response;
-			}
-		} catch (error) {
-			console.error('Error in AI guidance generation:', error);
-		}
-
-		// Fallback guidance
-		return `I understand you might be unsure about the ${fieldInfo?.name || currentField} field. 
-
-For this field, I need: ${fieldInfo?.description || 'specific information'}
-
-Could you please provide the actual ${fieldInfo?.name || currentField} information? For example, if this is a name field, provide the actual name. If it's a date field, provide the actual date.
-
-I'm here to help guide you through each field!`;
-	}
-
 	// AI-powered field validation
 	async function validateFieldWithAI(field, value) {
-		// Special handling for name fields (owner, created_by)
-		if (field === 'owner' || field === 'created_by') {
-			const sanitizedValue = typeof value === 'string' ? value.trim() : value;
-
-			// Check for invalid patterns
-			if (/^[0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/.test(sanitizedValue)) {
-				return {
-					valid: false,
-					message: 'Please provide a valid name, not just numbers or special characters.',
-					suggestion: 'Enter a real person\'s name (e.g., "John Smith", "Maria Garcia")'
-				};
-			}
-
-			// Check for single letters or very short inputs
-			if (/^[a-zA-Z]$/.test(sanitizedValue) || sanitizedValue.length < 2) {
-				return {
-					valid: false,
-					message: 'Please provide a full name, not just a single letter or very short input.',
-					suggestion: 'Enter a complete name (e.g., "John Smith", "Maria Garcia")'
-				};
-			}
-
-			// Check for patterns that look like partial names or typos
-			if (/^[a-z]{1,3}[0-9]+$/i.test(sanitizedValue)) {
-				return {
-					valid: false,
-					message: 'This looks like a partial name with numbers. Please provide a complete name.',
-					suggestion: 'Enter the full name of the person (e.g., "John Smith", "Maria Garcia")'
-				};
-			}
-
-			// Check for vague responses
-			const vagueResponses = [
-				'skip',
-				'n/a',
-				'none',
-				'i dont know',
-				'idk',
-				'not sure',
-				'maybe',
-				'tbd',
-				'unknown',
-				'test',
-				'hello',
-				'ok',
-				'same',
-				'asdf',
-				'qwerty',
-				'123456',
-				'abc'
-			];
-			if (vagueResponses.includes(sanitizedValue.toLowerCase())) {
-				return {
-					valid: false,
-					message:
-						'Please provide a real person\'s name. Responses like "' +
-						sanitizedValue +
-						'" are not allowed.',
-					suggestion: 'Enter the actual name of the person (e.g., "John Smith", "Maria Garcia")'
-				};
-			}
-
-			// If it passes basic checks, it's likely valid
-			return {
-				valid: true,
-				message: '',
-				suggestion: ''
-			};
-		}
-
 		const systemPrompt =
 			"You are a validation expert. Analyze the given value for the specified field and determine if it's appropriate.\n" +
 			'Field: ' +
@@ -1720,7 +1421,6 @@ I'm here to help guide you through each field!`;
 			'- Title: Should be descriptive, professional, 3+ characters, not just emojis or numbers\n' +
 			'- Module: Should be readable (not camelCase like "UserMgmt"), 2+ characters\n' +
 			'- Owner: Should be a real name, not just numbers or special characters, 2+ characters\n' +
-			'- Created By: Should be a real name, not just numbers or special characters, 2+ characters\n' +
 			'\n' +
 			'Respond in JSON format:\n' +
 			'{\n' +
@@ -2376,7 +2076,7 @@ I'm here to help guide you through each field!`;
 
 		// Use enhanced processFieldInput for name suggestion fields
 		if (NAME_SUGGESTION_FIELDS.includes(field)) {
-			await processFieldInput(field, input);
+			await processFieldInput(field, input, false);
 			return;
 		}
 
@@ -2650,8 +2350,24 @@ I'm here to help guide you through each field!`;
 
 		// Only handle field input if we're in asking or editing state
 		if (state === 'asking' || state === 'editing') {
+			// Debug logging for name suggestion issues
+			if (NAME_SUGGESTION_FIELDS.includes(currentField)) {
+				console.log(
+					'Processing input:',
+					input,
+					'Current field:',
+					currentField,
+					'Suggestions showing:',
+					showingSuggestions,
+					'Suggestion field:',
+					suggestionField
+				);
+			}
+
 			// Check if suggestions are currently showing
 			if (showingSuggestions && suggestionField === currentField) {
+				console.log('Handling suggestion selection for field:', currentField);
+				// Handle suggestion selection (number or full name)
 				await handleSuggestionSelection(input);
 				return;
 			}
@@ -3116,30 +2832,18 @@ I'm here to help guide you through each field!`;
 		}
 	}
 
-	// Enhanced AI-powered field extraction and validation with comprehensive rules
+	// Enhanced AI-powered field extraction and validation with sentiment analysis
 	async function processUserResponseWithAI(userInput) {
 		const systemPrompt =
-			'You are a FAST, INTELLIGENT, and HELPFUL DB request form assistant with advanced AI capabilities. You process EVERY field with AI validation and handle natural conversation flow.\n\n' +
-			'CRITICAL RULES:\n' +
-			'1. EVERY FIELD MUST BE PROCESSED BY AI - no exceptions\n' +
-			'2. REJECT vague inputs like "how to fill this", "now what", "help", "i dont know"\n' +
-			'3. PROVIDE helpful guidance for vague inputs instead of processing as data\n' +
-			'4. VALIDATE every input thoroughly before accepting\n' +
-			'5. MAINTAIN natural conversation flow\n' +
-			'6. DETECT user intent and sentiment\n' +
-			'7. FIX typos and normalize data automatically\n' +
-			'8. EXTRACT multiple fields from single responses when possible\n\n' +
+			'You are a FAST, INTELLIGENT, and HELPFUL DB request form assistant with advanced Named Entity Recognition (NER) capabilities. You understand natural language, fix typos automatically, detect user sentiment, and extract key entities from text.\n\n' +
 			'FORM FIELDS & REQUIREMENTS:\n' +
-			'1. title: Descriptive title (3+ chars, professional, no vague terms)\n' +
+			'1. title: Descriptive title (3+ chars, professional)\n' +
 			'2. type: "Feature", "Bug", or "Improvement" (case-insensitive)\n' +
 			'3. description: Detailed explanation (15+ chars, meaningful content)\n' +
-			'4. priority: "0 - Critical", "1 - High", "2 - Medium", "3 - Low"\n' +
-			'5. owner: Full name of responsible person (no partial names like "din1")\n' +
-			'6. created_by: Full name of person creating request (no partial names)\n' +
-			'7. client: Team/department/client name\n' +
-			'8. module: Specific system module or feature\n' +
-			'9. due_date: Valid future date or natural language\n' +
-			'10. reference_link: Valid URL or empty\n\n' +
+			'4. priority: "0 - Critical", "1 - High", "2 - Medium", "3 - Low" (or just "Critical", "High", "Medium", "Low")\n' +
+			'5. owner: Full name of responsible person\n' +
+			'6. created_by: Full name of person creating request\n' +
+			'7. client: Team/department/client name\n\n' +
 			'CURRENT STATE:\n' +
 			'- Current field: ' +
 			(currentField || 'title') +
@@ -3150,36 +2854,40 @@ I'm here to help guide you through each field!`;
 			'- User input: "' +
 			userInput +
 			'"\n\n' +
-			'VAGUE INPUT DETECTION:\n' +
-			'REJECT these inputs and provide guidance instead:\n' +
-			'- "how to fill this", "now what", "what should i do"\n' +
-			'- "i dont know", "not sure", "maybe", "um"\n' +
-			'- "ok", "same", "test", "hello"\n' +
-			'- Questions ending with "?"\n' +
-			'- Very short inputs (< 3 chars) unless they are valid options\n' +
-			"- Generic responses that don't provide actual data\n\n" +
-			'AI PROCESSING RULES:\n' +
-			'1. VAGUE INPUT HANDLING: If input is vague, set isVague=true and provide guidance\n' +
-			'2. FIELD VALIDATION: Validate every field with specific rules\n' +
-			'3. TYPO CORRECTION: Fix common typos automatically\n' +
-			'4. MULTI-FIELD EXTRACTION: Extract multiple fields when possible\n' +
-			'5. SENTIMENT ANALYSIS: Detect user mood and adapt response tone\n' +
-			'6. CONTEXT AWARENESS: Remember previous answers and maintain flow\n' +
-			'7. NATURAL LANGUAGE: Understand conversational inputs\n' +
-			'8. PROGRESS TRACKING: Always move to next field after valid input\n\n' +
-			'VALIDATION RULES:\n' +
-			'- title: Must be descriptive, 3+ chars, no vague terms\n' +
-			'- type: Must be Feature/Bug/Improvement\n' +
-			'- description: Must be detailed, 15+ chars, meaningful\n' +
-			'- priority: Must be valid priority level\n' +
-			'- owner/created_by: Must be full names, no partial names\n' +
-			'- due_date: Must be valid future date\n' +
-			'- reference_link: Must be valid URL or empty\n\n' +
+			'MULTI-FIELD EXTRACTION EXAMPLES:\n' +
+			'- "the priority is critical, due date is by next friday, module skip, client is ajio" → \n' +
+			'  extracted_data: { priority: "0 - Critical", due_date: "next friday", client: "Ajio" }\n' +
+			'- "it is high created by anupama, owner is rajamohan, due date is by next week, client ajio" → \n' +
+			'  extracted_data: { priority: "1 - High", created_by: "Anupama", owner: "Rajamohan", due_date: "next week", client: "Ajio" }\n\n' +
+			'NER CAPABILITIES:\n' +
+			'- Extract names: "Assign to John Smith" → owner: "John Smith"\n' +
+			'- Extract dates: "Due by next Friday" → due_date: "next Friday"\n' +
+			'- Extract priorities: "This is urgent" → priority: "0 - Critical"\n' +
+			'- Extract modules: "User management system" → module: "User Management"\n' +
+			'- Extract URLs: "Check this link: https://example.com" → reference_link: "https://example.com"\n\n' +
+			'SMART PROCESSING RULES:\n' +
+			'1. MULTI-FIELD EXTRACTION: Extract ALL relevant fields from a single input\n' +
+			'2. ENTITY EXTRACTION: Extract names, dates, priorities, modules, URLs from natural language\n' +
+			'3. TYPO CORRECTION: Fix common typos (e.g., "faetrue" → "Feature")\n' +
+			'4. PRIORITY MAPPING: Map numbers to text (0→Critical, 1→High, 2→Medium, 3→Low)\n' +
+			'5. VALIDATION: Only accept valid, meaningful content\n' +
+			"6. NO DUPLICATES: Don't re-ask for fields already completed\n" +
+			'7. PROGRESS: Always move to next field after valid input\n' +
+			'8. SENTIMENT: Detect user mood and adapt tone accordingly\n' +
+			'9. CONTEXT: Remember previous answers and maintain conversation flow\n' +
+			'10. INTENT: Detect if user wants to change/edit previous responses\n\n' +
+			'SENTIMENT ANALYSIS:\n' +
+			'- Frustrated: Use empathetic, patient tone\n' +
+			'- Confused: Provide extra guidance and examples\n' +
+			'- Happy: Keep positive, encouraging tone\n' +
+			'- Rushed: Be concise and efficient\n\n' +
+			'PRIORITY OPTIONS:\n' +
+			'- 0 or "Critical": Urgent, blocking work\n' +
+			'- 1 or "High": Important, needs attention soon\n' +
+			'- 2 or "Medium": Normal priority\n' +
+			'- 3 or "Low": Nice to have, not urgent\n\n' +
 			'RESPONSE FORMAT (JSON):\n' +
 			'{\n' +
-			'  "isVague": true/false,\n' +
-			'  "vagueReason": "explanation if vague",\n' +
-			'  "guidance": "helpful guidance if vague",\n' +
 			'  "extracted_data": {\n' +
 			'    "field_name": "extracted_value"\n' +
 			'  },\n' +
@@ -3192,8 +2900,10 @@ I'm here to help guide you through each field!`;
 			'  "user_intent": "provide_info/edit_previous/ask_help/skip/complete",\n' +
 			'  "next_action": "continue/ask_clarification/help/edit_previous/skip/summary",\n' +
 			'  "response": "friendly, concise response adapted to sentiment",\n' +
+			'  "field_guidance": "detailed help if requested",\n' +
 			'  "confidence": 0.0-1.0,\n' +
-			'  "tone": "empathetic/encouraging/concise/patient"\n' +
+			'  "tone": "empathetic/encouraging/concise/patient",\n' +
+			'  "entities_found": ["list of entities extracted"]\n' +
 			'}';
 
 		const messages = [
@@ -3210,17 +2920,6 @@ I'm here to help guide you through each field!`;
 
 		try {
 			const parsed = JSON.parse(aiResponse);
-
-			// Handle vague inputs detected by AI
-			if (parsed.isVague) {
-				return {
-					...parsed,
-					extracted_data: {}, // No data extracted for vague inputs
-					validation: { valid: false, message: parsed.vagueReason },
-					response: parsed.guidance || parsed.vagueReason
-				};
-			}
-
 			return parsed;
 		} catch (error) {
 			console.error('Failed to parse AI response:', error);
@@ -3390,19 +3089,17 @@ I'm here to help guide you through each field!`;
 		// Update user sentiment based on input
 		updateUserSentiment(userInput);
 
-		// ALWAYS process input with AI first - no exceptions
-		const aiResult = await processUserResponseWithAI(userInput);
-
-		// Handle vague inputs detected by AI
-		if (aiResult && aiResult.isVague) {
-			chatFlow.push({ role: 'assistant', content: aiResult.guidance || aiResult.response });
-			chatFlow = [...chatFlow];
-			await tick();
-			scrollToBottom();
-			return;
+		// Check if this is a name suggestion selection
+		if (showingSuggestions && suggestionField === currentField) {
+			const num = parseInt(userInput);
+			if (num >= 1 && num <= nameSuggestions.length) {
+				// User selected a suggestion
+				const selectedSuggestion = nameSuggestions[num - 1];
+				await processFieldInput(currentField, selectedSuggestion.name, true);
+				return;
+			}
 		}
 
-		// Handle special commands first (these bypass AI processing)
 		if (lowerInput === 'help' || lowerInput.includes('help')) {
 			await showFieldHelp();
 			return;
@@ -3414,6 +3111,14 @@ I'm here to help guide you through each field!`;
 			lowerInput.includes('review')
 		) {
 			await showSummary();
+			const pendingField = fieldOrder.find(
+				(f) => !formData[f] || formData[f].trim() === '' || fieldStatus[f] === 'pending'
+			);
+			if (pendingField) {
+				currentField = pendingField;
+				state = 'asking';
+				promptCurrentField();
+			}
 			return;
 		}
 		if (lowerInput === 'back' || lowerInput.includes('back')) {
@@ -3424,10 +3129,14 @@ I'm here to help guide you through each field!`;
 			await clearCurrentField();
 			return;
 		}
+
+		// Restart command
 		if (lowerInput === 'restart' || lowerInput.includes('restart')) {
 			window.location.reload();
 			return;
 		}
+
+		// Cancel command
 		if (lowerInput === 'cancel' || lowerInput.includes('cancel')) {
 			chatFlow.push({
 				role: 'assistant',
@@ -3438,12 +3147,8 @@ I'm here to help guide you through each field!`;
 			scrollToBottom();
 			return;
 		}
-		if (lowerInput === 'skip' || lowerInput.includes('skip')) {
-			await handleSkipField();
-			return;
-		}
 
-		// Handle edit command
+		// Edit command with better field detection
 		const editMatch = userInput.toLowerCase().match(/edit\s+(\w+)/);
 		if (editMatch) {
 			const fieldToEdit = editMatch[1];
@@ -3456,7 +3161,12 @@ I'm here to help guide you through each field!`;
 				editingField = matchedField;
 				chatFlow.push({
 					role: 'assistant',
-					content: `I'm ready to edit the ${fieldConfig[matchedField]?.name || matchedField} field. Current value: "${formData[matchedField] || 'empty'}". What would you like to change it to?`
+					content:
+						"I'm ready to edit the " +
+						(fieldConfig[matchedField]?.name || matchedField) +
+						' field. Current value: "' +
+						(formData[matchedField] || 'empty') +
+						'". What would you like to change it to?'
 				});
 				chatFlow = [...chatFlow];
 				saveChatFlow();
@@ -3465,7 +3175,11 @@ I'm here to help guide you through each field!`;
 			} else {
 				chatFlow.push({
 					role: 'assistant',
-					content: `I couldn't find a field called "${fieldToEdit}". Available fields: ${ALL_FIELDS.map((f) => fieldConfig[f]?.name || f).join(', ')}`
+					content:
+						'I couldn\'t find a field called "' +
+						fieldToEdit +
+						'". Available fields: ' +
+						ALL_FIELDS.map((f) => fieldConfig[f]?.name || f).join(', ')
 				});
 				chatFlow = [...chatFlow];
 				saveChatFlow();
@@ -3474,50 +3188,74 @@ I'm here to help guide you through each field!`;
 			}
 		}
 
-		// Handle name suggestion selection
-		if (showingSuggestions && suggestionField === currentField) {
-			const num = parseInt(userInput);
-			if (num >= 1 && num <= nameSuggestions.length) {
-				const selectedSuggestion = nameSuggestions[num - 1];
-				await processFieldInput(currentField, selectedSuggestion.name);
-				return;
-			}
+		// Skip command
+		if (lowerInput === 'skip' || lowerInput.includes('skip')) {
+			await handleSkipField();
+			return;
 		}
 
-		// Process the AI result
-		if (aiResult && aiResult.extracted_data && Object.keys(aiResult.extracted_data).length > 0) {
-			// Process extracted data
-			if (!editingField && state === 'asking') {
-				// Normal field-by-field flow - only process current field
-				const currentFieldValue = aiResult.extracted_data[currentField];
-				if (currentFieldValue && currentFieldValue.trim()) {
-					let valueToValidate = currentFieldValue;
+		try {
+			// Smart AI usage - only use AI for complex inputs
+			const lowerInput = userInput.toLowerCase();
+			const isCommand =
+				lowerInput.includes('help') ||
+				lowerInput.includes('summary') ||
+				lowerInput.includes('back') ||
+				lowerInput.includes('clear') ||
+				lowerInput.includes('skip') ||
+				lowerInput.includes('edit') ||
+				lowerInput.includes('restart') ||
+				lowerInput.includes('cancel');
 
-					// Special handling for due_date
-					if (currentField === 'due_date') {
-						const parsedDate = parseDate(currentFieldValue);
-						if (parsedDate) {
-							valueToValidate = parsedDate;
-						}
-					}
+			const isShortInput = userInput.length <= 3;
+			const isSimpleInput = /^(yes|no|ok|sure|fine|nope|yep)$/i.test(userInput.trim());
 
-					const validation = validateField(currentField, valueToValidate);
-					if (typeof validation === 'string') {
-						chatFlow.push({ role: 'assistant', content: validation });
-					} else if (validation.valid) {
-						formData[currentField] = validation.correctedValue;
-						formData = { ...formData };
-						fieldStatus[currentField] = 'completed';
-						fieldStatus = { ...fieldStatus };
-						await moveToNextField(currentField);
-					}
-					chatFlow = [...chatFlow];
-					await tick();
-					scrollToBottom();
-					return;
-				}
+			let aiResult;
+			if (isCommand || isShortInput || isSimpleInput) {
+				// Use instant fallback for commands and simple inputs
+				aiResult = processUserResponseFallback(userInput);
 			} else {
-				// Editing mode or multi-field processing
+				// Use AI for complex inputs FIRST
+				aiResult = await processUserResponseWithAI(userInput);
+
+				// If AI didn't extract anything useful, try rule-based extraction as fallback
+				if (
+					!aiResult ||
+					!aiResult.extracted_data ||
+					Object.keys(aiResult.extracted_data).length === 0
+				) {
+					const fallbackExtraction = extractMultipleFields(userInput);
+					if (Object.keys(fallbackExtraction).length > 0) {
+						aiResult = {
+							extracted_data: fallbackExtraction,
+							validation: { valid: true },
+							response:
+								"I've extracted some information from your message using fallback processing.",
+							confidence: 0.6
+						};
+					}
+				}
+
+				// Use NER to extract entities as additional context
+				const entities = extractEntities(userInput);
+				const entityMappings = mapEntitiesToFields(entities, currentField);
+
+				// Merge AI results with NER results
+				if (aiResult && aiResult.extracted_data) {
+					aiResult.extracted_data = { ...entityMappings, ...aiResult.extracted_data };
+				} else if (Object.keys(entityMappings).length > 0) {
+					// If AI didn't extract anything but NER did, use NER results
+					aiResult = {
+						extracted_data: entityMappings,
+						validation: { valid: true },
+						response: "I've extracted some information from your message.",
+						confidence: 0.8
+					};
+				}
+			}
+
+			if (aiResult && aiResult.extracted_data) {
+				// Process extracted data
 				let processedFields = 0;
 				let responseMessage = aiResult.response || '';
 				let hasValidationErrors = false;
@@ -3525,6 +3263,8 @@ I'm here to help guide you through each field!`;
 				for (const [fieldName, fieldValue] of Object.entries(aiResult.extracted_data)) {
 					if (fieldValue && fieldValue.trim()) {
 						let valueToValidate = fieldValue;
+
+						// Special handling for due_date to parse natural language
 						if (fieldName === 'due_date') {
 							const parsedDate = parseDate(fieldValue);
 							if (parsedDate) {
@@ -3533,53 +3273,130 @@ I'm here to help guide you through each field!`;
 						}
 
 						const validation = validateField(fieldName, valueToValidate);
+
 						if (typeof validation === 'string') {
+							// Validation failed - don't mark as complete
 							hasValidationErrors = true;
-							responseMessage += `\n\n⚠️ ${fieldConfig[fieldName]?.name || fieldName}: ${validation}`;
+							responseMessage +=
+								'\n\n⚠️ ' + (fieldConfig[fieldName]?.name || fieldName) + ': ' + validation;
+							if (aiResult.validation?.suggestions) {
+								responseMessage +=
+									'\n💡 Suggestions: ' + aiResult.validation.suggestions.join(', ');
+							}
+							// Ask for the same field again
+							responseMessage +=
+								'\n\nPlease provide a valid ' + (fieldConfig[fieldName]?.name || fieldName) + '.';
 						} else if (validation.valid) {
+							// Validation passed
 							formData[fieldName] = validation.correctedValue;
 							processedFields++;
 						}
 					}
 				}
 
+				// Only update form status and move to next field if no validation errors
 				if (processedFields > 0 && !hasValidationErrors) {
 					updateFieldStatus();
-					editingField = null;
+					editingField = null; // Clear editing mode
+
+					// Find next field
 					const nextField = getNextField();
 					if (nextField) {
 						const fieldInfo = fieldConfig[nextField];
-						responseMessage += `\n\n${fieldInfo?.description || 'Please provide ' + nextField}`;
+						responseMessage += '\n\n' + (fieldInfo?.description || 'Please provide ' + nextField);
 						currentField = nextField;
+					} else {
+						// Only show completion message if not already shown
+						if (!responseMessage.includes('All required fields complete')) {
+							responseMessage +=
+								'\n\n🎉 All required fields complete! Would you like to review your request or submit it?';
+						}
 					}
 				}
 
+				// Add response to chat
 				if (responseMessage.trim()) {
-					chatFlow.push({ role: 'assistant', content: responseMessage });
+					chatFlow.push({
+						role: 'assistant',
+						content: responseMessage
+					});
 				}
-			}
-		} else {
-			// No data extracted - provide guidance or process as single field
-			if (aiResult && aiResult.response) {
-				chatFlow.push({ role: 'assistant', content: aiResult.response });
+			} else if (aiResult && aiResult.field_guidance) {
+				// Show field guidance
+				chatFlow.push({
+					role: 'assistant',
+					content: aiResult.field_guidance
+				});
 			} else {
-				// Fallback to simple field processing
-				const validation = validateField(currentField, userInput);
-				if (typeof validation === 'string') {
-					chatFlow.push({ role: 'assistant', content: validation });
-				} else if (validation.valid) {
-					formData[currentField] = validation.correctedValue;
-					formData = { ...formData };
-					fieldStatus[currentField] = 'completed';
-					fieldStatus = { ...fieldStatus };
-					await moveToNextField(currentField);
+				// AI couldn't extract clear information - use fallback
+				const fallbackResult = processUserResponseFallback(userInput);
+
+				// Check if fallback processed multiple fields and moved to next field
+				if (
+					fallbackResult.extracted_data &&
+					Object.keys(fallbackResult.extracted_data).length > 0
+				) {
+					// Fallback already processed the data and updated currentField if needed
+					// Just add the response message
+					if (fallbackResult.response && fallbackResult.response.trim()) {
+						chatFlow.push({
+							role: 'assistant',
+							content: fallbackResult.response
+						});
+					}
+				} else {
+					// Single field processing
+					const validation = validateField(fallbackResult.field, fallbackResult.extracted_value);
+
+					if (typeof validation === 'string') {
+						chatFlow.push({
+							role: 'assistant',
+							content: validation
+						});
+					} else if (validation.valid) {
+						formData[fallbackResult.field] = validation.correctedValue;
+						updateFieldStatus();
+						editingField = null; // Clear editing mode
+
+						const nextField = getNextField();
+						if (nextField) {
+							const fieldInfo = fieldConfig[nextField];
+							chatFlow.push({
+								role: 'assistant',
+								content:
+									'I\'ve recorded "' +
+									validation.correctedValue +
+									'" for ' +
+									(fieldConfig[fallbackResult.field]?.name || fallbackResult.field) +
+									'. Now, ' +
+									fieldInfo.description
+							});
+							currentField = nextField;
+						} else {
+							chatFlow.push({
+								role: 'assistant',
+								content:
+									'All required fields are complete! Would you like to add any attachments or review your request?'
+							});
+						}
+					} else {
+						chatFlow.push({
+							role: 'assistant',
+							content:
+								fallbackResult.message ||
+								"I'm not sure I understood that. Could you please be more specific about what information you're trying to provide?"
+						});
+					}
 				}
 			}
+		} catch (error) {
+			console.error('AI processing error:', error);
+			// Fallback to original rule-based processing
+			await handleFieldInput(userInput);
 		}
 
 		chatFlow = [...chatFlow];
 		saveChatFlow();
-		await tick();
 		scrollToBottom();
 	}
 
