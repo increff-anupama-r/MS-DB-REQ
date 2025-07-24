@@ -1,0 +1,60 @@
+{
+	"fields": [
+		{
+			"name": "Request Title",
+			"key": "title",
+			"type": "text",
+			"required": true
+		},
+		{
+			"name": "Type",
+			"key": "type",
+			"type": "dropdown",
+			"required": true,
+			"options": ["Bug", "Feature Request", "Enhancement", "Improvement"]
+		},
+		{
+			"name": "Requesting Client",
+			"key": "client",
+			"type": "text",
+			"required": true
+		},
+		{
+			"name": "Module",
+			"key": "module",
+			"type": "text",
+			"required": false
+		},
+		{
+			"name": "Request Description",
+			"key": "description",
+			"type": "textarea",
+			"required": true
+		},
+		{
+			"name": "Request Owner",
+			"key": "owner",
+			"type": "text",
+			"required": true
+		},
+		{
+			"name": "Priority",
+			"key": "priority",
+			"type": "dropdown",
+			"required": true,
+			"options": ["High", "Medium", "Low", "Critical"]
+		},
+		{
+			"name": "Due Date",
+			"key": "due_date",
+			"type": "date",
+			"required": true
+		},
+		{
+			"name": "Reference Link",
+			"key": "reference_link",
+			"type": "url",
+			"required": false
+		}
+	]
+}
