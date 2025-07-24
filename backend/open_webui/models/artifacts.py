@@ -7,7 +7,7 @@ from open_webui.internal.db import Base
 
 class ArtifactModel(Base):
     __tablename__ = "artifacts"
-    
+
     id = Column(String, primary_key=True)
     workspace_id = Column(String, nullable=False)
     title = Column(String, nullable=False)
@@ -58,23 +58,32 @@ class Artifacts:
     @staticmethod
     def get_artifacts_by_workspace_id(workspace_id: str) -> List[ArtifactModel]:
         from open_webui.internal.db import Session
+
         with Session() as session:
-            return session.query(ArtifactModel).filter(
-                ArtifactModel.workspace_id == workspace_id
-            ).all()
-    
+            return (
+                session.query(ArtifactModel)
+                .filter(ArtifactModel.workspace_id == workspace_id)
+                .all()
+            )
+
     @staticmethod
     def get_artifact_by_id(artifact_id: str) -> Optional[ArtifactModel]:
         from open_webui.internal.db import Session
+
         with Session() as session:
-            return session.query(ArtifactModel).filter(
-                ArtifactModel.id == artifact_id
-            ).first()
-    
+            return (
+                session.query(ArtifactModel)
+                .filter(ArtifactModel.id == artifact_id)
+                .first()
+            )
+
     @staticmethod
-    def insert_new_artifact(workspace_id: str, form_data: ArtifactForm, artifact_id: str) -> Optional[ArtifactModel]:
+    def insert_new_artifact(
+        workspace_id: str, form_data: ArtifactForm, artifact_id: str
+    ) -> Optional[ArtifactModel]:
         from open_webui.internal.db import Session
         from datetime import datetime
+
         with Session() as session:
             artifact = ArtifactModel(
                 id=artifact_id,
@@ -88,47 +97,57 @@ class Artifacts:
                 priority=form_data.priority,
                 due_date=datetime.fromisoformat(form_data.due_date),
                 reference_link=form_data.reference_link,
-                data=form_data.data
+                data=form_data.data,
             )
 
             session.add(artifact)
             session.commit()
             session.refresh(artifact)
             return artifact
-    
-    @staticmethod 
-    def update_artifact(artifact_id: str, form_data: ArtifactForm) -> Optional[ArtifactModel]:
+
+    @staticmethod
+    def update_artifact(
+        artifact_id: str, form_data: ArtifactForm
+    ) -> Optional[ArtifactModel]:
         from open_webui.internal.db import Session
         from datetime import datetime
+
         with Session() as session:
-            artifact = session.query(ArtifactModel).filter(
-                ArtifactModel.id == artifact_id
-            ).first()
+            artifact = (
+                session.query(ArtifactModel)
+                .filter(ArtifactModel.id == artifact_id)
+                .first()
+            )
             if artifact:
-                setattr(artifact, 'title', form_data.title)
-                setattr(artifact, 'type', form_data.type)
-                setattr(artifact, 'client', form_data.client)
-                setattr(artifact, 'module', form_data.module)
-                setattr(artifact, 'description', form_data.description)
-                setattr(artifact, 'owner', form_data.owner)
-                setattr(artifact, 'priority', form_data.priority)
-                setattr(artifact, 'due_date', datetime.fromisoformat(form_data.due_date))
-                setattr(artifact, 'reference_link', form_data.reference_link)
-                setattr(artifact, 'data', form_data.data)
+                setattr(artifact, "title", form_data.title)
+                setattr(artifact, "type", form_data.type)
+                setattr(artifact, "client", form_data.client)
+                setattr(artifact, "module", form_data.module)
+                setattr(artifact, "description", form_data.description)
+                setattr(artifact, "owner", form_data.owner)
+                setattr(artifact, "priority", form_data.priority)
+                setattr(
+                    artifact, "due_date", datetime.fromisoformat(form_data.due_date)
+                )
+                setattr(artifact, "reference_link", form_data.reference_link)
+                setattr(artifact, "data", form_data.data)
                 session.commit()
                 session.refresh(artifact)
                 return artifact
             return None
-    
+
     @staticmethod
     def delete_artifact(artifact_id: str) -> bool:
         from open_webui.internal.db import Session
+
         with Session() as session:
-            artifact = session.query(ArtifactModel).filter(
-                ArtifactModel.id == artifact_id
-            ).first()
+            artifact = (
+                session.query(ArtifactModel)
+                .filter(ArtifactModel.id == artifact_id)
+                .first()
+            )
             if artifact:
                 session.delete(artifact)
                 session.commit()
                 return True
-            return False 
+            return False

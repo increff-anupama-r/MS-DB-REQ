@@ -328,32 +328,43 @@
 			try {
 				const token = localStorage.token;
 				const matchResponse = await matchUserName(token, { name: selection });
-				
+
 				if (matchResponse && matchResponse.found && matchResponse.user) {
 					// Found a match - use the matched name
 					const matchedName = matchResponse.user.name;
-					
+
 					chatFlow.push({
 						role: 'assistant',
-						content: 'I\'ve recorded "' + matchedName + '" for ' + fieldConfig[currentField].name + '.'
+						content:
+							'I\'ve recorded "' + matchedName + '" for ' + fieldConfig[currentField].name + '.'
 					});
 					chatFlow = [...chatFlow];
 					await tick();
 					scrollToBottom();
-					
+
 					await processFieldInput(currentField, matchedName);
 					return;
-				} else if (matchResponse && matchResponse.suggestions && matchResponse.suggestions.length > 0) {
+				} else if (
+					matchResponse &&
+					matchResponse.suggestions &&
+					matchResponse.suggestions.length > 0
+				) {
 					// No exact match but we have suggestions - show them
 					nameSuggestions = matchResponse.suggestions;
 					showingSuggestions = true;
 					suggestionField = currentField;
-					
+
 					const suggestionText =
-						'I couldn\'t find an exact match for "' + selection + '". Here are some suggestions:\n\n' +
-						matchResponse.suggestions.map((s, i) => i + 1 + '. ' + s.name + ' - ' + s.email).join('\n') +
-						'\n\nPlease select a number (1-' + matchResponse.suggestions.length + ') or type the exact full name if not listed.';
-					
+						'I couldn\'t find an exact match for "' +
+						selection +
+						'". Here are some suggestions:\n\n' +
+						matchResponse.suggestions
+							.map((s, i) => i + 1 + '. ' + s.name + ' - ' + s.email)
+							.join('\n') +
+						'\n\nPlease select a number (1-' +
+						matchResponse.suggestions.length +
+						') or type the exact full name if not listed.';
+
 					chatFlow.push({ role: 'assistant', content: suggestionText });
 					chatFlow = [...chatFlow];
 					await tick();
@@ -366,12 +377,16 @@
 
 			// If no match found or API failed, validate the input using AI
 			const aiValidation = await validateFieldWithAI(currentField, selection);
-			
+
 			if (aiValidation && !aiValidation.valid) {
 				// AI validation failed - ask user to re-enter
 				chatFlow.push({
 					role: 'assistant',
-					content: aiValidation.message + '\n\nPlease provide a valid ' + fieldConfig[currentField].name + '.'
+					content:
+						aiValidation.message +
+						'\n\nPlease provide a valid ' +
+						fieldConfig[currentField].name +
+						'.'
 				});
 				chatFlow = [...chatFlow];
 				await tick();
@@ -439,7 +454,7 @@
 			chatFlow = [...chatFlow];
 			await tick();
 			scrollToBottom();
-			
+
 			// Then add the next field prompt
 			chatFlow.push({ role: 'assistant', content: nextPrompt });
 			chatFlow = [...chatFlow];
@@ -1454,7 +1469,7 @@
 	// Detect vague inputs that need guidance instead of processing as field data
 	async function detectVagueInput(userInput, currentField) {
 		const lowerInput = userInput.toLowerCase().trim();
-		
+
 		// Patterns that indicate the user is asking for help or guidance
 		const vaguePatterns = [
 			// Help-seeking patterns
@@ -1475,7 +1490,7 @@
 			/umm/i,
 			/uh/i,
 			/uhh/i,
-			
+
 			// Question patterns
 			/\?$/,
 			/what is/i,
@@ -1483,7 +1498,7 @@
 			/help me/i,
 			/i need help/i,
 			/please help/i,
-			
+
 			// Confusion patterns
 			/i'm confused/i,
 			/im confused/i,
@@ -1491,7 +1506,7 @@
 			/not clear/i,
 			/unclear/i,
 			/what does this mean/i,
-			
+
 			// Generic responses
 			/ok/i,
 			/okay/i,
@@ -1501,12 +1516,12 @@
 			/same/i,
 			/yes/i,
 			/no/i,
-			
+
 			// Very short or unclear inputs
 			/^[a-z]{1,2}$/i,
 			/^[0-9]{1,2}$/,
 			/^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/,
-			
+
 			// Test inputs
 			/test/i,
 			/hello/i,
@@ -1517,19 +1532,19 @@
 			/123456/i,
 			/abc/i
 		];
-		
+
 		// Check if input matches any vague patterns
 		for (const pattern of vaguePatterns) {
 			if (pattern.test(lowerInput)) {
 				return true;
 			}
 		}
-		
+
 		// Check for very short inputs that might be incomplete
 		if (lowerInput.length < 3 && !/^(0|1|2|3|critical|high|medium|low)$/i.test(lowerInput)) {
 			return true;
 		}
-		
+
 		// Use AI to make final determination for complex cases
 		try {
 			const systemPrompt = `You are an expert at detecting whether user input is a vague request for help or actual field data.
@@ -1569,14 +1584,14 @@ Respond with JSON:
 		} catch (error) {
 			console.error('Error in AI vague input detection:', error);
 		}
-		
+
 		return false;
 	}
 
 	// Provide AI-powered guidance for vague inputs
 	async function provideAIGuidance(userInput, currentField) {
 		const fieldInfo = fieldConfig[currentField];
-		
+
 		try {
 			const systemPrompt = `You are a helpful AI assistant guiding users through a database request form. The user has provided a vague input and needs guidance.
 
@@ -1597,7 +1612,10 @@ Make your response conversational and specific to the field. Don't be too long -
 
 			const response = await callOpenAI([
 				{ role: 'system', content: systemPrompt },
-				{ role: 'user', content: `Help the user with field "${currentField}" after their input: "${userInput}"` }
+				{
+					role: 'user',
+					content: `Help the user with field "${currentField}" after their input: "${userInput}"`
+				}
 			]);
 
 			if (response) {
@@ -1606,7 +1624,7 @@ Make your response conversational and specific to the field. Don't be too long -
 		} catch (error) {
 			console.error('Error in AI guidance generation:', error);
 		}
-		
+
 		// Fallback guidance
 		return `I understand you might be unsure about the ${fieldInfo?.name || currentField} field. 
 
@@ -1622,7 +1640,7 @@ I'm here to help guide you through each field!`;
 		// Special handling for name fields (owner, created_by)
 		if (field === 'owner' || field === 'created_by') {
 			const sanitizedValue = typeof value === 'string' ? value.trim() : value;
-			
+
 			// Check for invalid patterns
 			if (/^[0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/.test(sanitizedValue)) {
 				return {
@@ -1631,7 +1649,7 @@ I'm here to help guide you through each field!`;
 					suggestion: 'Enter a real person\'s name (e.g., "John Smith", "Maria Garcia")'
 				};
 			}
-			
+
 			// Check for single letters or very short inputs
 			if (/^[a-zA-Z]$/.test(sanitizedValue) || sanitizedValue.length < 2) {
 				return {
@@ -1640,7 +1658,7 @@ I'm here to help guide you through each field!`;
 					suggestion: 'Enter a complete name (e.g., "John Smith", "Maria Garcia")'
 				};
 			}
-			
+
 			// Check for patterns that look like partial names or typos
 			if (/^[a-z]{1,3}[0-9]+$/i.test(sanitizedValue)) {
 				return {
@@ -1649,20 +1667,38 @@ I'm here to help guide you through each field!`;
 					suggestion: 'Enter the full name of the person (e.g., "John Smith", "Maria Garcia")'
 				};
 			}
-			
+
 			// Check for vague responses
 			const vagueResponses = [
-				'skip', 'n/a', 'none', 'i dont know', 'idk', 'not sure', 'maybe', 'tbd', 'unknown',
-				'test', 'hello', 'ok', 'same', 'asdf', 'qwerty', '123456', 'abc'
+				'skip',
+				'n/a',
+				'none',
+				'i dont know',
+				'idk',
+				'not sure',
+				'maybe',
+				'tbd',
+				'unknown',
+				'test',
+				'hello',
+				'ok',
+				'same',
+				'asdf',
+				'qwerty',
+				'123456',
+				'abc'
 			];
 			if (vagueResponses.includes(sanitizedValue.toLowerCase())) {
 				return {
 					valid: false,
-					message: 'Please provide a real person\'s name. Responses like "' + sanitizedValue + '" are not allowed.',
+					message:
+						'Please provide a real person\'s name. Responses like "' +
+						sanitizedValue +
+						'" are not allowed.',
 					suggestion: 'Enter the actual name of the person (e.g., "John Smith", "Maria Garcia")'
 				};
 			}
-			
+
 			// If it passes basic checks, it's likely valid
 			return {
 				valid: true,
@@ -3121,7 +3157,7 @@ I'm here to help guide you through each field!`;
 			'- "ok", "same", "test", "hello"\n' +
 			'- Questions ending with "?"\n' +
 			'- Very short inputs (< 3 chars) unless they are valid options\n' +
-			'- Generic responses that don\'t provide actual data\n\n' +
+			"- Generic responses that don't provide actual data\n\n" +
 			'AI PROCESSING RULES:\n' +
 			'1. VAGUE INPUT HANDLING: If input is vague, set isVague=true and provide guidance\n' +
 			'2. FIELD VALIDATION: Validate every field with specific rules\n' +
@@ -3174,7 +3210,7 @@ I'm here to help guide you through each field!`;
 
 		try {
 			const parsed = JSON.parse(aiResponse);
-			
+
 			// Handle vague inputs detected by AI
 			if (parsed.isVague) {
 				return {
@@ -3184,7 +3220,7 @@ I'm here to help guide you through each field!`;
 					response: parsed.guidance || parsed.vagueReason
 				};
 			}
-			
+
 			return parsed;
 		} catch (error) {
 			console.error('Failed to parse AI response:', error);
@@ -3356,7 +3392,7 @@ I'm here to help guide you through each field!`;
 
 		// ALWAYS process input with AI first - no exceptions
 		const aiResult = await processUserResponseWithAI(userInput);
-		
+
 		// Handle vague inputs detected by AI
 		if (aiResult && aiResult.isVague) {
 			chatFlow.push({ role: 'assistant', content: aiResult.guidance || aiResult.response });
@@ -3371,7 +3407,12 @@ I'm here to help guide you through each field!`;
 			await showFieldHelp();
 			return;
 		}
-		if (lowerInput === 'summary' || lowerInput.includes('summary') || lowerInput === 'review' || lowerInput.includes('review')) {
+		if (
+			lowerInput === 'summary' ||
+			lowerInput.includes('summary') ||
+			lowerInput === 'review' ||
+			lowerInput.includes('review')
+		) {
 			await showSummary();
 			return;
 		}
@@ -3388,7 +3429,10 @@ I'm here to help guide you through each field!`;
 			return;
 		}
 		if (lowerInput === 'cancel' || lowerInput.includes('cancel')) {
-			chatFlow.push({ role: 'assistant', content: "I've cancelled the current operation. What would you like to do next?" });
+			chatFlow.push({
+				role: 'assistant',
+				content: "I've cancelled the current operation. What would you like to do next?"
+			});
 			chatFlow = [...chatFlow];
 			saveChatFlow();
 			scrollToBottom();
@@ -3403,7 +3447,11 @@ I'm here to help guide you through each field!`;
 		const editMatch = userInput.toLowerCase().match(/edit\s+(\w+)/);
 		if (editMatch) {
 			const fieldToEdit = editMatch[1];
-			const matchedField = ALL_FIELDS.find(f => f.toLowerCase().includes(fieldToEdit) || fieldConfig[f]?.name.toLowerCase().includes(fieldToEdit));
+			const matchedField = ALL_FIELDS.find(
+				(f) =>
+					f.toLowerCase().includes(fieldToEdit) ||
+					fieldConfig[f]?.name.toLowerCase().includes(fieldToEdit)
+			);
 			if (matchedField) {
 				editingField = matchedField;
 				chatFlow.push({
@@ -3417,7 +3465,7 @@ I'm here to help guide you through each field!`;
 			} else {
 				chatFlow.push({
 					role: 'assistant',
-					content: `I couldn't find a field called "${fieldToEdit}". Available fields: ${ALL_FIELDS.map(f => fieldConfig[f]?.name || f).join(', ')}`
+					content: `I couldn't find a field called "${fieldToEdit}". Available fields: ${ALL_FIELDS.map((f) => fieldConfig[f]?.name || f).join(', ')}`
 				});
 				chatFlow = [...chatFlow];
 				saveChatFlow();
